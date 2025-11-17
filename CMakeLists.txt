@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(package-explorer
     src/main.cpp
+    src/DummyPackageManager.cpp
 )
 
 find_package(Curses REQUIRED)

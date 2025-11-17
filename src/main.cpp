@@ -2,23 +2,10 @@
 #include <string>
 #include <vector>
 
+#include "DummyPackageManager.h"
+#include "PackageManager.h"
+
 namespace {
-
-void draw_centered_text(int row, const std::string &text, bool bold = false) {
-  int max_y, max_x;
-  getmaxyx(stdscr, max_y, max_x);
-
-  int x = 0;
-  if (static_cast<int>(text.size()) < max_x) {
-    x = (max_x - static_cast<int>(text.size())) / 2;
-  }
-
-  if (bold)
-    attron(A_BOLD);
-  mvprintw(row, x, "%s", text.c_str());
-  if (bold)
-    attroff(A_BOLD);
-}
 
 WINDOW *create_window(int h, int w, int y, int x, const std::string &title) {
   WINDOW *win = newwin(h, w, y, x);
@@ -32,7 +19,7 @@ WINDOW *create_window(int h, int w, int y, int x, const std::string &title) {
   return win;
 }
 
-void render_packages(WINDOW *win, const std::vector<std::string> &packages,
+void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
                      int selected_index, int scroll_offset) {
   int height, width;
   getmaxyx(win, height, width);
@@ -56,21 +43,28 @@ void render_packages(WINDOW *win, const std::vector<std::string> &packages,
     }
 
     int row = start_row + i;
-    const std::string &name = packages[pkg_index];
+    const auto &pkg = packages[pkg_index];
+
+    std::string line = pkg.name + " " + pkg.version;
+
+    if (static_cast<int>(line.size()) > width - 2) {
+      line.resize(width - 5);
+      line += "...";
+    }
 
     if (pkg_index == selected_index) {
       wattron(win, A_REVERSE);
-      mvwprintw(win, row, 1, "%-*s", width - 2, name.c_str());
+      mvwprintw(win, row, 1, "%-*s", width - 2, line.c_str());
       wattroff(win, A_REVERSE);
     } else {
-      mvwprintw(win, row, 1, "%-*s", width - 2, name.c_str());
+      mvwprintw(win, row, 1, "%-*s", width - 2, line.c_str());
     }
   }
 
   wrefresh(win);
 }
 
-void render_details(WINDOW *win, const std::vector<std::string> &packages,
+void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
                     int selected_index) {
   int height, width;
   getmaxyx(win, height, width);
@@ -82,14 +76,28 @@ void render_details(WINDOW *win, const std::vector<std::string> &packages,
   mvwprintw(win, 0, 2, " Details ");
   wattroff(win, A_BOLD);
 
-  int row = 2;
-  mvwprintw(win, row, 2, "Selected package:");
+  mvwprintw(win, 2, 2, "Selected package:");
 
   if (!packages.empty() && selected_index >= 0 &&
       selected_index < static_cast<int>(packages.size())) {
-    mvwprintw(win, row + 1, 4, "%s", packages[selected_index].c_str());
+
+    const auto &pkg = packages[selected_index];
+
+    mvwprintw(win, 4, 4, "Name: %s", pkg.name.c_str());
+    mvwprintw(win, 5, 4, "Version: %s", pkg.version.c_str());
+
+    int desc_row = 7;
+    mvwprintw(win, desc_row, 4, "Description:");
+
+    if (!pkg.description.empty()) {
+      mvwprintw(win, desc_row + 1, 6, "%.*s", width - 8,
+                pkg.description.c_str());
+    } else {
+      mvwprintw(win, desc_row + 1, 6, "(none)");
+    }
+
   } else {
-    mvwprintw(win, row + 1, 4, "(none)");
+    mvwprintw(win, 4, 4, "(none)");
   }
 
   mvwprintw(win, height - 2, 2, "Use Up/Down, q to quit");
@@ -118,10 +126,8 @@ int main() {
   WINDOW *packages_win = create_window(height, left_w, 0, 0, "Packages");
   WINDOW *details_win = create_window(height, right_w, 0, left_w, "Details");
 
-  std::vector<std::string> packages;
-  for (int i = 1; i <= 50; ++i) {
-    packages.push_back("package-" + std::to_string(i));
-  }
+  pkg::DummyPackageManager manager;
+  std::vector<pkg::Package> packages = manager.listInstalled();
 
   int selected_index = 0;
   int scroll_offset = 0;

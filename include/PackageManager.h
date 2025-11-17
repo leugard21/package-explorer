@@ -4,9 +4,11 @@
 #include <vector>
 
 namespace pkg {
+
 struct Package {
   std::string name;
   std::string version;
+  std::string description;
 };
 
 class PackageManager {
