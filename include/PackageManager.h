@@ -12,6 +12,9 @@ struct Package {
   std::string repo;
   std::string architecture;
   std::string install_date;
+
+  std::vector<std::string> depends_on;
+  std::vector<std::string> required_by;
 };
 
 class PackageManager {
@@ -19,7 +22,6 @@ public:
   virtual ~PackageManager() = default;
 
   virtual std::vector<Package> listInstalled() = 0;
-
   virtual bool fillDetails(Package &pkg) = 0;
 };
 

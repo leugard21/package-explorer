@@ -15,6 +15,13 @@ std::vector<Package> DummyPackageManager::listInstalled() {
     p.architecture = "x86_64";
     p.install_date = "N/A";
 
+    if (i > 1) {
+      p.depends_on.push_back("package-" + std::to_string(i - 1));
+    }
+    if (i < 50) {
+      p.required_by.push_back("package-" + std::to_string(i + 1));
+    }
+
     result.push_back(std::move(p));
   }
 

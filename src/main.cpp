@@ -105,14 +105,54 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
       mvwprintw(win, 8, 4, "Installed: %s", pkg.install_date.c_str());
     }
 
-    int desc_row = 10;
-    mvwprintw(win, desc_row, 4, "Description:");
+    int row = 10;
+    mvwprintw(win, row, 4, "Depends On:");
+    row++;
+
+    if (!pkg.depends_on.empty()) {
+      std::string deps_line;
+      for (std::size_t i = 0; i < pkg.depends_on.size(); ++i) {
+        if (i > 0)
+          deps_line += ", ";
+        deps_line += pkg.depends_on[i];
+      }
+      if (static_cast<int>(deps_line.size()) > width - 8) {
+        deps_line.resize(width - 11);
+        deps_line += "...";
+      }
+      mvwprintw(win, row, 6, "%.*s", width - 8, deps_line.c_str());
+    } else {
+      mvwprintw(win, row, 6, "(none)");
+    }
+
+    row += 2;
+    mvwprintw(win, row, 4, "Required By:");
+    row++;
+
+    if (!pkg.required_by.empty()) {
+      std::string req_line;
+      for (std::size_t i = 0; i < pkg.required_by.size(); ++i) {
+        if (i > 0)
+          req_line += ", ";
+        req_line += pkg.required_by[i];
+      }
+      if (static_cast<int>(req_line.size()) > width - 8) {
+        req_line.resize(width - 11);
+        req_line += "...";
+      }
+      mvwprintw(win, row, 6, "%.*s", width - 8, req_line.c_str());
+    } else {
+      mvwprintw(win, row, 6, "(none)");
+    }
+
+    row += 2;
+    mvwprintw(win, row, 4, "Description:");
+    row++;
 
     if (!pkg.description.empty()) {
-      mvwprintw(win, desc_row + 1, 6, "%.*s", width - 8,
-                pkg.description.c_str());
+      mvwprintw(win, row, 6, "%.*s", width - 8, pkg.description.c_str());
     } else {
-      mvwprintw(win, desc_row + 1, 6, "(none)");
+      mvwprintw(win, row, 6, "(none)");
     }
 
   } else {
