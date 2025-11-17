@@ -97,12 +97,40 @@ std::unordered_set<std::string> get_foreign_packages() {
   return foreign;
 }
 
+std::unordered_set<std::string> get_explicit_packages() {
+  std::unordered_set<std::string> explicit_set;
+
+  const char *cmd = "pacman -Qeq 2>/dev/null";
+
+  FILE *fp = popen(cmd, "r");
+  if (!fp) {
+    return explicit_set;
+  }
+
+  std::array<char, 4096> buffer{};
+
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), fp) != nullptr) {
+    std::string line(buffer.data());
+    if (!line.empty() && line.back() == '\n') {
+      line.pop_back();
+    }
+    line = trim(line);
+    if (!line.empty()) {
+      explicit_set.insert(line);
+    }
+  }
+
+  pclose(fp);
+  return explicit_set;
+}
+
 } // namespace
 
 std::vector<Package> PacmanPackageManager::listInstalled() {
   std::vector<Package> packages;
 
   auto foreign = get_foreign_packages();
+  auto explicit_set = get_explicit_packages();
 
   const char *cmd = "pacman -Q";
 
@@ -145,6 +173,12 @@ std::vector<Package> PacmanPackageManager::listInstalled() {
       pkg.is_foreign = true;
     } else {
       pkg.is_foreign = false;
+    }
+
+    if (explicit_set.find(pkg.name) != explicit_set.end()) {
+      pkg.is_explicit = true;
+    } else {
+      pkg.is_explicit = false;
     }
 
     packages.push_back(std::move(pkg));

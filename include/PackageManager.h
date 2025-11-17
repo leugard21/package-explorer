@@ -17,6 +17,7 @@ struct Package {
   std::vector<std::string> required_by;
 
   bool is_foreign = false;
+  bool is_explicit = false;
 };
 
 class PackageManager {

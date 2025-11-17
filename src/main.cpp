@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <memory>
@@ -10,6 +11,10 @@
 #include "PacmanPackageManager.h"
 
 namespace {
+
+enum class FilterMode { All, ExplicitOnly, AurOnly };
+
+enum class SortMode { NameAsc, NameDesc, ExplicitFirst, AurFirst };
 
 WINDOW *create_window(int h, int w, int y, int x, const std::string &title) {
   WINDOW *win = newwin(h, w, y, x);
@@ -57,31 +62,104 @@ bool fuzzy_match(const std::string &pattern, const std::string &text) {
   return true;
 }
 
+bool filter_accept(const pkg::Package &pkg, FilterMode mode) {
+  if (mode == FilterMode::All) {
+    return true;
+  } else if (mode == FilterMode::ExplicitOnly) {
+    return pkg.is_explicit;
+  } else if (mode == FilterMode::AurOnly) {
+    return pkg.is_foreign;
+  }
+  return true;
+}
+
+bool sort_less(const pkg::Package &a, const pkg::Package &b, SortMode mode) {
+  if (mode == SortMode::NameAsc || mode == SortMode::NameDesc) {
+    std::string la = to_lower(a.name);
+    std::string lb = to_lower(b.name);
+    if (mode == SortMode::NameAsc) {
+      return la < lb;
+    } else {
+      return la > lb;
+    }
+  } else if (mode == SortMode::ExplicitFirst) {
+    bool ea = a.is_explicit;
+    bool eb = b.is_explicit;
+    if (ea != eb) {
+      return ea && !eb;
+    }
+    std::string la = to_lower(a.name);
+    std::string lb = to_lower(b.name);
+    return la < lb;
+  } else if (mode == SortMode::AurFirst) {
+    bool fa = a.is_foreign;
+    bool fb = b.is_foreign;
+    if (fa != fb) {
+      return fa && !fb;
+    }
+    std::string la = to_lower(a.name);
+    std::string lb = to_lower(b.name);
+    return la < lb;
+  }
+  return false;
+}
+
 void recompute_visible_indices(const std::vector<pkg::Package> &packages,
-                               const std::string &query,
+                               const std::string &query, FilterMode filter_mode,
+                               SortMode sort_mode,
                                std::vector<int> &visible_indices) {
   visible_indices.clear();
 
-  if (query.empty()) {
-    visible_indices.reserve(packages.size());
-    for (int i = 0; i < static_cast<int>(packages.size()); ++i) {
-      visible_indices.push_back(i);
-    }
-    return;
-  }
-
   for (int i = 0; i < static_cast<int>(packages.size()); ++i) {
     const auto &pkg = packages[i];
-    if (fuzzy_match(query, pkg.name)) {
-      visible_indices.push_back(i);
+    if (!filter_accept(pkg, filter_mode)) {
+      continue;
     }
+    if (!query.empty() && !fuzzy_match(query, pkg.name)) {
+      continue;
+    }
+    visible_indices.push_back(i);
   }
+
+  std::sort(visible_indices.begin(), visible_indices.end(),
+            [&](int ia, int ib) {
+              const auto &a = packages[ia];
+              const auto &b = packages[ib];
+              return sort_less(a, b, sort_mode);
+            });
+}
+
+std::string filter_mode_label(FilterMode mode) {
+  switch (mode) {
+  case FilterMode::All:
+    return "All";
+  case FilterMode::ExplicitOnly:
+    return "Explicit";
+  case FilterMode::AurOnly:
+    return "AUR";
+  }
+  return "";
+}
+
+std::string sort_mode_label(SortMode mode) {
+  switch (mode) {
+  case SortMode::NameAsc:
+    return "Name↑";
+  case SortMode::NameDesc:
+    return "Name↓";
+  case SortMode::ExplicitFirst:
+    return "Explicit↑";
+  case SortMode::AurFirst:
+    return "AUR↑";
+  }
+  return "";
 }
 
 void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
                      const std::vector<int> &visible_indices,
                      int selected_visible_index, int scroll_offset,
-                     const std::string &search_query, bool search_mode) {
+                     const std::string &search_query, bool search_mode,
+                     FilterMode filter_mode, SortMode sort_mode) {
   int height, width;
   getmaxyx(win, height, width);
 
@@ -92,8 +170,11 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
   werase(win);
   box(win, 0, 0);
 
+  std::string mode_label = filter_mode_label(filter_mode);
+  std::string sort_label = sort_mode_label(sort_mode);
+  std::string title = " Packages [" + mode_label + "] (" + sort_label + ") ";
   wattron(win, A_BOLD);
-  mvwprintw(win, 0, 2, " Packages ");
+  mvwprintw(win, 0, 2, "%s", title.c_str());
   wattroff(win, A_BOLD);
 
   std::string prompt = "/ ";
@@ -198,6 +279,9 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, row, 4, "Source: %s", source_str);
     row++;
 
+    mvwprintw(win, row, 4, "Explicit: %s", pkg.is_explicit ? "yes" : "no");
+    row++;
+
     if (!pkg.architecture.empty()) {
       mvwprintw(win, row, 4, "Arch: %s", pkg.architecture.c_str());
       row++;
@@ -262,15 +346,16 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, 4, 4, "(none)");
   }
 
-  mvwprintw(win, height - 2, 2,
-            "Up/Down, / search, h/? help, ESC clear, q quit");
+  mvwprintw(
+      win, height - 2, 2,
+      "Up/Down, / search, f filter, o order, h/? help, ESC clear, q quit");
 
   wrefresh(win);
 }
 
 void render_help_overlay(int max_y, int max_x) {
-  int h = 13;
-  int w = 40;
+  int h = 15;
+  int w = 46;
   if (h > max_y - 2)
     h = max_y - 2;
   if (w > max_x - 2)
@@ -291,6 +376,8 @@ void render_help_overlay(int max_y, int max_x) {
   mvwprintw(win, row++, 2, "/       : Search packages");
   mvwprintw(win, row++, 2, "ESC     : Clear search");
   mvwprintw(win, row++, 2, "Enter   : Exit search mode");
+  mvwprintw(win, row++, 2, "f       : Filter (All/Explicit/AUR)");
+  mvwprintw(win, row++, 2, "o       : Order (Name/Explicit/AUR)");
   mvwprintw(win, row++, 2, "h or ?  : Toggle this help");
   mvwprintw(win, row++, 2, "q       : Quit");
 
@@ -339,9 +426,12 @@ int main() {
   std::string search_query;
   bool search_mode = false;
   bool show_help = false;
+  FilterMode filter_mode = FilterMode::All;
+  SortMode sort_mode = SortMode::NameAsc;
 
   std::vector<int> visible_indices;
-  recompute_visible_indices(packages, search_query, visible_indices);
+  recompute_visible_indices(packages, search_query, filter_mode, sort_mode,
+                            visible_indices);
 
   int selected_visible_index = 0;
   int scroll_offset = 0;
@@ -361,7 +451,7 @@ int main() {
 
   render_packages(packages_win, packages, visible_indices,
                   selected_visible_index, scroll_offset, search_query,
-                  search_mode);
+                  search_mode, filter_mode, sort_mode);
   render_details(details_win, packages, current_global_index);
 
   int ch;
@@ -379,7 +469,8 @@ int main() {
       if (ch == 27) {
         search_mode = false;
         search_query.clear();
-        recompute_visible_indices(packages, search_query, visible_indices);
+        recompute_visible_indices(packages, search_query, filter_mode,
+                                  sort_mode, visible_indices);
         selected_visible_index = 0;
         scroll_offset = 0;
         if (!visible_indices.empty()) {
@@ -392,7 +483,8 @@ int main() {
       } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
         if (!search_query.empty()) {
           search_query.pop_back();
-          recompute_visible_indices(packages, search_query, visible_indices);
+          recompute_visible_indices(packages, search_query, filter_mode,
+                                    sort_mode, visible_indices);
           selected_visible_index = 0;
           scroll_offset = 0;
           if (!visible_indices.empty()) {
@@ -430,7 +522,8 @@ int main() {
         need_rerender = true;
       } else if (ch >= 32 && ch <= 126) {
         search_query.push_back(static_cast<char>(ch));
-        recompute_visible_indices(packages, search_query, visible_indices);
+        recompute_visible_indices(packages, search_query, filter_mode,
+                                  sort_mode, visible_indices);
         selected_visible_index = 0;
         scroll_offset = 0;
         if (!visible_indices.empty()) {
@@ -447,6 +540,46 @@ int main() {
         need_rerender = true;
       } else if (ch == 'h' || ch == '?') {
         show_help = true;
+        need_rerender = true;
+      } else if (ch == 'f') {
+        if (filter_mode == FilterMode::All) {
+          filter_mode = FilterMode::ExplicitOnly;
+        } else if (filter_mode == FilterMode::ExplicitOnly) {
+          filter_mode = FilterMode::AurOnly;
+        } else {
+          filter_mode = FilterMode::All;
+        }
+        recompute_visible_indices(packages, search_query, filter_mode,
+                                  sort_mode, visible_indices);
+        selected_visible_index = 0;
+        scroll_offset = 0;
+        if (!visible_indices.empty()) {
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        } else {
+          current_global_index = -1;
+        }
+        need_rerender = true;
+      } else if (ch == 'o') {
+        if (sort_mode == SortMode::NameAsc) {
+          sort_mode = SortMode::NameDesc;
+        } else if (sort_mode == SortMode::NameDesc) {
+          sort_mode = SortMode::ExplicitFirst;
+        } else if (sort_mode == SortMode::ExplicitFirst) {
+          sort_mode = SortMode::AurFirst;
+        } else {
+          sort_mode = SortMode::NameAsc;
+        }
+        recompute_visible_indices(packages, search_query, filter_mode,
+                                  sort_mode, visible_indices);
+        selected_visible_index = 0;
+        scroll_offset = 0;
+        if (!visible_indices.empty()) {
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        } else {
+          current_global_index = -1;
+        }
         need_rerender = true;
       } else if (ch == KEY_UP || ch == KEY_DOWN) {
         if (!visible_indices.empty()) {
@@ -480,7 +613,7 @@ int main() {
       } else {
         render_packages(packages_win, packages, visible_indices,
                         selected_visible_index, scroll_offset, search_query,
-                        search_mode);
+                        search_mode, filter_mode, sort_mode);
         render_details(details_win, packages, current_global_index);
       }
     }

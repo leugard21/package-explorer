@@ -26,12 +26,18 @@ std::vector<Package> DummyPackageManager::listInstalled() {
       p.is_foreign = true;
     }
 
+    if (i % 2 == 1) {
+      p.is_explicit = true;
+    } else {
+      p.is_explicit = false;
+    }
+
     result.push_back(std::move(p));
   }
 
   return result;
 }
 
-bool DummyPackageManager::fillDetails(Package & /*pkg*/) { return true; }
+bool DummyPackageManager::fillDetails(Package &) { return true; }
 
 } // namespace pkg
