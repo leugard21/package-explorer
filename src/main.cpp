@@ -116,6 +116,17 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
 
   int max_visible = static_cast<int>(visible_indices.size());
 
+  if (max_visible == 0) {
+    std::string msg = "No packages found";
+    if (static_cast<int>(msg.size()) > width - 2) {
+      msg.resize(width - 2);
+    }
+    int row = list_start_row;
+    mvwprintw(win, row, 1, "%-*s", width - 2, msg.c_str());
+    wrefresh(win);
+    return;
+  }
+
   for (int i = 0; i < list_height; ++i) {
     int vis_index = scroll_offset + i;
     if (vis_index >= max_visible) {
@@ -251,9 +262,42 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, 4, 4, "(none)");
   }
 
-  mvwprintw(win, height - 2, 2, "Up/Down, / search, ESC clear, q quit");
+  mvwprintw(win, height - 2, 2,
+            "Up/Down, / search, h/? help, ESC clear, q quit");
 
   wrefresh(win);
+}
+
+void render_help_overlay(int max_y, int max_x) {
+  int h = 13;
+  int w = 40;
+  if (h > max_y - 2)
+    h = max_y - 2;
+  if (w > max_x - 2)
+    w = max_x - 2;
+
+  int starty = (max_y - h) / 2;
+  int startx = (max_x - w) / 2;
+
+  WINDOW *win = newwin(h, w, starty, startx);
+  box(win, 0, 0);
+
+  wattron(win, A_BOLD);
+  mvwprintw(win, 0, 2, " Help ");
+  wattroff(win, A_BOLD);
+
+  int row = 2;
+  mvwprintw(win, row++, 2, "Up/Down : Move selection");
+  mvwprintw(win, row++, 2, "/       : Search packages");
+  mvwprintw(win, row++, 2, "ESC     : Clear search");
+  mvwprintw(win, row++, 2, "Enter   : Exit search mode");
+  mvwprintw(win, row++, 2, "h or ?  : Toggle this help");
+  mvwprintw(win, row++, 2, "q       : Quit");
+
+  mvwprintw(win, h - 2, 2, "Press h or ? to close");
+
+  wrefresh(win);
+  delwin(win);
 }
 
 bool has_pacman() {
@@ -274,6 +318,7 @@ int main() {
   getmaxyx(stdscr, max_y, max_x);
 
   clear();
+  refresh();
 
   int left_w = static_cast<int>(max_x * 0.30);
   int right_w = max_x - left_w;
@@ -293,6 +338,7 @@ int main() {
 
   std::string search_query;
   bool search_mode = false;
+  bool show_help = false;
 
   std::vector<int> visible_indices;
   recompute_visible_indices(packages, search_query, visible_indices);
@@ -322,7 +368,14 @@ int main() {
   while ((ch = getch()) != 'q') {
     bool need_rerender = false;
 
-    if (search_mode) {
+    if (show_help) {
+      if (ch == 'h' || ch == '?') {
+        show_help = false;
+        need_rerender = true;
+      } else if (ch == 'q') {
+        break;
+      }
+    } else if (search_mode) {
       if (ch == 27) {
         search_mode = false;
         search_query.clear();
@@ -392,6 +445,9 @@ int main() {
       if (ch == '/') {
         search_mode = true;
         need_rerender = true;
+      } else if (ch == 'h' || ch == '?') {
+        show_help = true;
+        need_rerender = true;
       } else if (ch == KEY_UP || ch == KEY_DOWN) {
         if (!visible_indices.empty()) {
           if (ch == KEY_UP && selected_visible_index > 0) {
@@ -416,10 +472,17 @@ int main() {
     }
 
     if (need_rerender) {
-      render_packages(packages_win, packages, visible_indices,
-                      selected_visible_index, scroll_offset, search_query,
-                      search_mode);
-      render_details(details_win, packages, current_global_index);
+      getmaxyx(stdscr, max_y, max_x);
+      clear();
+      refresh();
+      if (show_help) {
+        render_help_overlay(max_y, max_x);
+      } else {
+        render_packages(packages_win, packages, visible_indices,
+                        selected_visible_index, scroll_offset, search_query,
+                        search_mode);
+        render_details(details_win, packages, current_global_index);
+      }
     }
   }
 
