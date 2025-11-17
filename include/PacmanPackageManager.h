@@ -5,7 +5,7 @@
 
 namespace pkg {
 
-class DummyPackageManager : public PackageManager {
+class PacmanPackageManager : public PackageManager {
 public:
   std::vector<Package> listInstalled() override;
   bool fillDetails(Package &pkg) override;

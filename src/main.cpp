@@ -1,9 +1,12 @@
+#include <cstdlib>
+#include <memory>
 #include <ncurses.h>
 #include <string>
 #include <vector>
 
 #include "DummyPackageManager.h"
 #include "PackageManager.h"
+#include "PacmanPackageManager.h"
 
 namespace {
 
@@ -45,7 +48,11 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
     int row = start_row + i;
     const auto &pkg = packages[pkg_index];
 
-    std::string line = pkg.name + " " + pkg.version;
+    std::string line = pkg.name;
+    if (!pkg.version.empty()) {
+      line += " ";
+      line += pkg.version;
+    }
 
     if (static_cast<int>(line.size()) > width - 2) {
       line.resize(width - 5);
@@ -86,7 +93,19 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, 4, 4, "Name: %s", pkg.name.c_str());
     mvwprintw(win, 5, 4, "Version: %s", pkg.version.c_str());
 
-    int desc_row = 7;
+    if (!pkg.repo.empty()) {
+      mvwprintw(win, 6, 4, "Repository: %s", pkg.repo.c_str());
+    }
+
+    if (!pkg.architecture.empty()) {
+      mvwprintw(win, 7, 4, "Arch: %s", pkg.architecture.c_str());
+    }
+
+    if (!pkg.install_date.empty()) {
+      mvwprintw(win, 8, 4, "Installed: %s", pkg.install_date.c_str());
+    }
+
+    int desc_row = 10;
     mvwprintw(win, desc_row, 4, "Description:");
 
     if (!pkg.description.empty()) {
@@ -103,6 +122,11 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
   mvwprintw(win, height - 2, 2, "Use Up/Down, q to quit");
 
   wrefresh(win);
+}
+
+bool has_pacman() {
+  int rc = std::system("pacman -V > /dev/null 2>&1");
+  return rc == 0;
 }
 
 } // namespace
@@ -126,8 +150,14 @@ int main() {
   WINDOW *packages_win = create_window(height, left_w, 0, 0, "Packages");
   WINDOW *details_win = create_window(height, right_w, 0, left_w, "Details");
 
-  pkg::DummyPackageManager manager;
-  std::vector<pkg::Package> packages = manager.listInstalled();
+  std::unique_ptr<pkg::PackageManager> manager;
+  if (has_pacman()) {
+    manager = std::make_unique<pkg::PacmanPackageManager>();
+  } else {
+    manager = std::make_unique<pkg::DummyPackageManager>();
+  }
+
+  std::vector<pkg::Package> packages = manager->listInstalled();
 
   int selected_index = 0;
   int scroll_offset = 0;
@@ -137,6 +167,11 @@ int main() {
     int h, w;
     getmaxyx(packages_win, h, w);
     list_height = h - 2;
+  }
+
+  if (!packages.empty() && selected_index >= 0 &&
+      selected_index < static_cast<int>(packages.size())) {
+    manager->fillDetails(packages[selected_index]);
   }
 
   render_packages(packages_win, packages, selected_index, scroll_offset);
@@ -168,6 +203,13 @@ int main() {
         scroll_offset = selected_index;
       } else if (selected_index >= scroll_offset + list_height) {
         scroll_offset = selected_index - list_height + 1;
+      }
+
+      if (!packages.empty() && selected_index >= 0 &&
+          selected_index < static_cast<int>(packages.size())) {
+
+        auto &pkg = packages[selected_index];
+        manager->fillDetails(pkg);
       }
 
       render_packages(packages_win, packages, selected_index, scroll_offset);
