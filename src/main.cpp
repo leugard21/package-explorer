@@ -1,3 +1,4 @@
+#include <cctype>
 #include <cstdlib>
 #include <memory>
 #include <ncurses.h>
@@ -22,13 +23,71 @@ WINDOW *create_window(int h, int w, int y, int x, const std::string &title) {
   return win;
 }
 
+std::string to_lower(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (unsigned char ch : s) {
+    out.push_back(static_cast<char>(std::tolower(ch)));
+  }
+  return out;
+}
+
+bool fuzzy_match(const std::string &pattern, const std::string &text) {
+  if (pattern.empty())
+    return true;
+
+  std::string p = to_lower(pattern);
+  std::string t = to_lower(text);
+
+  std::size_t ti = 0;
+  for (char pc : p) {
+    bool found = false;
+    while (ti < t.size()) {
+      if (t[ti] == pc) {
+        found = true;
+        ++ti;
+        break;
+      }
+      ++ti;
+    }
+    if (!found) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void recompute_visible_indices(const std::vector<pkg::Package> &packages,
+                               const std::string &query,
+                               std::vector<int> &visible_indices) {
+  visible_indices.clear();
+
+  if (query.empty()) {
+    visible_indices.reserve(packages.size());
+    for (int i = 0; i < static_cast<int>(packages.size()); ++i) {
+      visible_indices.push_back(i);
+    }
+    return;
+  }
+
+  for (int i = 0; i < static_cast<int>(packages.size()); ++i) {
+    const auto &pkg = packages[i];
+    if (fuzzy_match(query, pkg.name)) {
+      visible_indices.push_back(i);
+    }
+  }
+}
+
 void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
-                     int selected_index, int scroll_offset) {
+                     const std::vector<int> &visible_indices,
+                     int selected_visible_index, int scroll_offset,
+                     const std::string &search_query, bool search_mode) {
   int height, width;
   getmaxyx(win, height, width);
 
-  int list_height = height - 2;
-  int start_row = 1;
+  int search_row = 1;
+  int list_start_row = 2;
+  int list_height = height - 3;
 
   werase(win);
   box(win, 0, 0);
@@ -37,16 +96,36 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
   mvwprintw(win, 0, 2, " Packages ");
   wattroff(win, A_BOLD);
 
-  int max_index = static_cast<int>(packages.size());
+  std::string prompt = search_mode ? "/ " : "/ ";
+  std::string query_display = search_query;
+  int max_query_w = width - 4 - static_cast<int>(prompt.size());
+  if (static_cast<int>(query_display.size()) > max_query_w) {
+    query_display.erase(max_query_w);
+  }
+
+  mvwprintw(win, search_row, 1, "%-*s", width - 2, "");
+  mvwprintw(win, search_row, 2, "%s%s", prompt.c_str(), query_display.c_str());
+  if (search_mode) {
+    wmove(win, search_row,
+          2 + static_cast<int>(prompt.size()) +
+              static_cast<int>(query_display.size()));
+    curs_set(1);
+  } else {
+    curs_set(0);
+  }
+
+  int max_visible = static_cast<int>(visible_indices.size());
 
   for (int i = 0; i < list_height; ++i) {
-    int pkg_index = scroll_offset + i;
-    if (pkg_index >= max_index) {
+    int vis_index = scroll_offset + i;
+    if (vis_index >= max_visible) {
       break;
     }
 
-    int row = start_row + i;
-    const auto &pkg = packages[pkg_index];
+    int global_index = visible_indices[vis_index];
+    const auto &pkg = packages[global_index];
+
+    int row = list_start_row + i;
 
     std::string line = pkg.name;
     if (!pkg.version.empty()) {
@@ -59,7 +138,7 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
       line += "...";
     }
 
-    if (pkg_index == selected_index) {
+    if (vis_index == selected_visible_index) {
       wattron(win, A_REVERSE);
       mvwprintw(win, row, 1, "%-*s", width - 2, line.c_str());
       wattroff(win, A_REVERSE);
@@ -72,7 +151,7 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
 }
 
 void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
-                    int selected_index) {
+                    int global_index) {
   int height, width;
   getmaxyx(win, height, width);
 
@@ -85,10 +164,10 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
 
   mvwprintw(win, 2, 2, "Selected package:");
 
-  if (!packages.empty() && selected_index >= 0 &&
-      selected_index < static_cast<int>(packages.size())) {
+  if (!packages.empty() && global_index >= 0 &&
+      global_index < static_cast<int>(packages.size())) {
 
-    const auto &pkg = packages[selected_index];
+    const auto &pkg = packages[global_index];
 
     mvwprintw(win, 4, 4, "Name: %s", pkg.name.c_str());
     mvwprintw(win, 5, 4, "Version: %s", pkg.version.c_str());
@@ -159,7 +238,7 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, 4, 4, "(none)");
   }
 
-  mvwprintw(win, height - 2, 2, "Use Up/Down, q to quit");
+  mvwprintw(win, height - 2, 2, "Up/Down, / search, ESC clear, q quit");
 
   wrefresh(win);
 }
@@ -199,61 +278,136 @@ int main() {
 
   std::vector<pkg::Package> packages = manager->listInstalled();
 
-  int selected_index = 0;
+  std::string search_query;
+  bool search_mode = false;
+
+  std::vector<int> visible_indices;
+  recompute_visible_indices(packages, search_query, visible_indices);
+
+  int selected_visible_index = 0;
   int scroll_offset = 0;
 
   int list_height;
   {
     int h, w;
     getmaxyx(packages_win, h, w);
-    list_height = h - 2;
+    list_height = h - 3;
   }
 
-  if (!packages.empty() && selected_index >= 0 &&
-      selected_index < static_cast<int>(packages.size())) {
-    manager->fillDetails(packages[selected_index]);
+  int current_global_index = -1;
+  if (!visible_indices.empty()) {
+    current_global_index = visible_indices[selected_visible_index];
+    manager->fillDetails(packages[current_global_index]);
   }
 
-  render_packages(packages_win, packages, selected_index, scroll_offset);
-  render_details(details_win, packages, selected_index);
+  render_packages(packages_win, packages, visible_indices,
+                  selected_visible_index, scroll_offset, search_query,
+                  search_mode);
+  render_details(details_win, packages, current_global_index);
 
   int ch;
   while ((ch = getch()) != 'q') {
-    bool changed = false;
+    bool need_rerender = false;
 
-    switch (ch) {
-    case KEY_UP:
-      if (selected_index > 0) {
-        selected_index--;
-        changed = true;
+    if (search_mode) {
+      if (ch == 27) {
+        search_mode = false;
+        search_query.clear();
+        recompute_visible_indices(packages, search_query, visible_indices);
+        selected_visible_index = 0;
+        scroll_offset = 0;
+        if (!visible_indices.empty()) {
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        } else {
+          current_global_index = -1;
+        }
+        need_rerender = true;
+      } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+        if (!search_query.empty()) {
+          search_query.pop_back();
+          recompute_visible_indices(packages, search_query, visible_indices);
+          selected_visible_index = 0;
+          scroll_offset = 0;
+          if (!visible_indices.empty()) {
+            current_global_index = visible_indices[selected_visible_index];
+            manager->fillDetails(packages[current_global_index]);
+          } else {
+            current_global_index = -1;
+          }
+          need_rerender = true;
+        } else {
+          need_rerender = true;
+        }
+      } else if (ch == '\n' || ch == KEY_ENTER) {
+        search_mode = false;
+        need_rerender = true;
+      } else if (ch == KEY_UP || ch == KEY_DOWN) {
+        if (!visible_indices.empty()) {
+          if (ch == KEY_UP && selected_visible_index > 0) {
+            selected_visible_index--;
+          } else if (ch == KEY_DOWN &&
+                     selected_visible_index + 1 <
+                         static_cast<int>(visible_indices.size())) {
+            selected_visible_index++;
+          }
+
+          if (selected_visible_index < scroll_offset) {
+            scroll_offset = selected_visible_index;
+          } else if (selected_visible_index >= scroll_offset + list_height) {
+            scroll_offset = selected_visible_index - list_height + 1;
+          }
+
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        }
+        need_rerender = true;
+      } else if (ch >= 32 && ch <= 126) {
+        search_query.push_back(static_cast<char>(ch));
+        recompute_visible_indices(packages, search_query, visible_indices);
+        selected_visible_index = 0;
+        scroll_offset = 0;
+        if (!visible_indices.empty()) {
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        } else {
+          current_global_index = -1;
+        }
+        need_rerender = true;
+      } else {
       }
-      break;
-    case KEY_DOWN:
-      if (selected_index + 1 < static_cast<int>(packages.size())) {
-        selected_index++;
-        changed = true;
+    } else {
+      if (ch == '/') {
+        search_mode = true;
+        need_rerender = true;
+      } else if (ch == KEY_UP || ch == KEY_DOWN) {
+        if (!visible_indices.empty()) {
+          if (ch == KEY_UP && selected_visible_index > 0) {
+            selected_visible_index--;
+          } else if (ch == KEY_DOWN &&
+                     selected_visible_index + 1 <
+                         static_cast<int>(visible_indices.size())) {
+            selected_visible_index++;
+          }
+
+          if (selected_visible_index < scroll_offset) {
+            scroll_offset = selected_visible_index;
+          } else if (selected_visible_index >= scroll_offset + list_height) {
+            scroll_offset = selected_visible_index - list_height + 1;
+          }
+
+          current_global_index = visible_indices[selected_visible_index];
+          manager->fillDetails(packages[current_global_index]);
+        }
+        need_rerender = true;
       }
-      break;
-    default:
-      break;
     }
 
-    if (changed) {
-      if (selected_index < scroll_offset) {
-        scroll_offset = selected_index;
-      } else if (selected_index >= scroll_offset + list_height) {
-        scroll_offset = selected_index - list_height + 1;
-      }
-
-      if (!packages.empty() && selected_index >= 0 &&
-          selected_index < static_cast<int>(packages.size())) {
-
-        auto &pkg = packages[selected_index];
-        manager->fillDetails(pkg);
-      }
-
-      render_packages(packages_win, packages, selected_index, scroll_offset);
-      render_details(details_win, packages, selected_index);
+    if (need_rerender) {
+      render_packages(packages_win, packages, visible_indices,
+                      selected_visible_index, scroll_offset, search_query,
+                      search_mode);
+      render_details(details_win, packages, current_global_index);
     }
   }
 
