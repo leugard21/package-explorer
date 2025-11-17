@@ -12,15 +12,23 @@ void draw_centered_text(int row, const std::string &text, bool bold = false) {
     x = (max_x - static_cast<int>(text.size())) / 2;
   }
 
-  if (bold) {
+  if (bold)
     attron(A_BOLD);
-  }
-
   mvprintw(row, x, "%s", text.c_str());
-
-  if (bold) {
+  if (bold)
     attroff(A_BOLD);
-  }
+}
+
+WINDOW *create_window(int h, int w, int y, int x, const std::string &title) {
+  WINDOW *win = newwin(h, w, y, x);
+  box(win, 0, 0);
+
+  wattron(win, A_BOLD);
+  mvwprintw(win, 0, 2, " %s ", title.c_str());
+  wattroff(win, A_BOLD);
+
+  wrefresh(win);
+  return win;
 }
 
 } // namespace
@@ -32,20 +40,18 @@ int main() {
   keypad(stdscr, TRUE);
   curs_set(0);
 
-  clear();
-
   int max_y, max_x;
   getmaxyx(stdscr, max_y, max_x);
 
-  const std::string title = "Package Explorer";
-  const std::string subtitle = "C++20 + ncurses";
-  const std::string hint = "Press 'q' to quit";
+  clear();
 
-  int center_row = max_y / 2;
+  int left_w = max_x * 0.30;
+  int right_w = max_x - left_w;
 
-  draw_centered_text(center_row - 1, title, true);
-  draw_centered_text(center_row, subtitle, false);
-  draw_centered_text(center_row + 2, hint, false);
+  int height = max_y;
+
+  WINDOW *packages_win = create_window(height, left_w, 0, 0, "Packages");
+  WINDOW *details_win = create_window(height, right_w, 0, left_w, "Details");
 
   refresh();
 
@@ -53,6 +59,8 @@ int main() {
   while ((ch = getch()) != 'q') {
   }
 
+  delwin(packages_win);
+  delwin(details_win);
   endwin();
   return 0;
 }
