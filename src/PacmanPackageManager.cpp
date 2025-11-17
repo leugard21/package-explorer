@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace pkg {
@@ -69,10 +70,39 @@ std::vector<std::string> split_dep_list(const std::string &raw) {
   return out;
 }
 
+std::unordered_set<std::string> get_foreign_packages() {
+  std::unordered_set<std::string> foreign;
+
+  const char *cmd = "pacman -Qmq 2>/dev/null";
+
+  FILE *fp = popen(cmd, "r");
+  if (!fp) {
+    return foreign;
+  }
+
+  std::array<char, 4096> buffer{};
+
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), fp) != nullptr) {
+    std::string line(buffer.data());
+    if (!line.empty() && line.back() == '\n') {
+      line.pop_back();
+    }
+    line = trim(line);
+    if (!line.empty()) {
+      foreign.insert(line);
+    }
+  }
+
+  pclose(fp);
+  return foreign;
+}
+
 } // namespace
 
 std::vector<Package> PacmanPackageManager::listInstalled() {
   std::vector<Package> packages;
+
+  auto foreign = get_foreign_packages();
 
   const char *cmd = "pacman -Q";
 
@@ -110,6 +140,12 @@ std::vector<Package> PacmanPackageManager::listInstalled() {
     pkg.install_date.clear();
     pkg.depends_on.clear();
     pkg.required_by.clear();
+
+    if (foreign.find(pkg.name) != foreign.end()) {
+      pkg.is_foreign = true;
+    } else {
+      pkg.is_foreign = false;
+    }
 
     packages.push_back(std::move(pkg));
   }

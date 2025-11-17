@@ -96,7 +96,7 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
   mvwprintw(win, 0, 2, " Packages ");
   wattroff(win, A_BOLD);
 
-  std::string prompt = search_mode ? "/ " : "/ ";
+  std::string prompt = "/ ";
   std::string query_display = search_query;
   int max_query_w = width - 4 - static_cast<int>(prompt.size());
   if (static_cast<int>(query_display.size()) > max_query_w) {
@@ -131,6 +131,10 @@ void render_packages(WINDOW *win, const std::vector<pkg::Package> &packages,
     if (!pkg.version.empty()) {
       line += " ";
       line += pkg.version;
+    }
+
+    if (pkg.is_foreign) {
+      line += " [AUR]";
     }
 
     if (static_cast<int>(line.size()) > width - 2) {
@@ -172,19 +176,28 @@ void render_details(WINDOW *win, const std::vector<pkg::Package> &packages,
     mvwprintw(win, 4, 4, "Name: %s", pkg.name.c_str());
     mvwprintw(win, 5, 4, "Version: %s", pkg.version.c_str());
 
+    int row = 6;
+
     if (!pkg.repo.empty()) {
-      mvwprintw(win, 6, 4, "Repository: %s", pkg.repo.c_str());
+      mvwprintw(win, row, 4, "Repository: %s", pkg.repo.c_str());
+      row++;
     }
 
+    const char *source_str = pkg.is_foreign ? "AUR (foreign)" : "Official";
+    mvwprintw(win, row, 4, "Source: %s", source_str);
+    row++;
+
     if (!pkg.architecture.empty()) {
-      mvwprintw(win, 7, 4, "Arch: %s", pkg.architecture.c_str());
+      mvwprintw(win, row, 4, "Arch: %s", pkg.architecture.c_str());
+      row++;
     }
 
     if (!pkg.install_date.empty()) {
-      mvwprintw(win, 8, 4, "Installed: %s", pkg.install_date.c_str());
+      mvwprintw(win, row, 4, "Installed: %s", pkg.install_date.c_str());
+      row++;
     }
 
-    int row = 10;
+    row += 1;
     mvwprintw(win, row, 4, "Depends On:");
     row++;
 
@@ -374,7 +387,6 @@ int main() {
           current_global_index = -1;
         }
         need_rerender = true;
-      } else {
       }
     } else {
       if (ch == '/') {

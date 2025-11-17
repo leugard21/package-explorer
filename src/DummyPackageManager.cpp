@@ -22,6 +22,10 @@ std::vector<Package> DummyPackageManager::listInstalled() {
       p.required_by.push_back("package-" + std::to_string(i + 1));
     }
 
+    if (i % 5 == 0) {
+      p.is_foreign = true;
+    }
+
     result.push_back(std::move(p));
   }
 

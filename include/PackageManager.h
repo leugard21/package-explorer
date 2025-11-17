@@ -15,6 +15,8 @@ struct Package {
 
   std::vector<std::string> depends_on;
   std::vector<std::string> required_by;
+
+  bool is_foreign = false;
 };
 
 class PackageManager {
