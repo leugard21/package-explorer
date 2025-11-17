@@ -1,0 +1,15 @@
+pkgbase = package-explorer
+	pkgdesc = TUI package explorer for Pacman (packages, deps, AUR flags, fuzzy search)
+	pkgver = 0.1.0.ed5aead
+	pkgrel = 1
+	url = https://github.com/leugard21/package-explorer
+	arch = x86_64
+	license = MIT
+	makedepends = git
+	makedepends = cmake
+	depends = ncurses
+	depends = pacman
+	source = package-explorer::git+https://github.com/leugard21/package-explorer.git
+	sha256sums = SKIP
+
+pkgname = package-explorer
